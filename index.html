@@ -1,80 +1,92 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hello, Deno</title>
-  <link rel="preload" href="https://demo-styles.deno.deno.net/fonts/Moranga-Regular.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="preload" href="https://demo-styles.deno.deno.net/fonts/Moranga-Medium.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="preload" href="https://demo-styles.deno.deno.net/fonts/Recursive_Variable.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="https://demo-styles.deno.deno.net/styles.css">
+  <title>Cloudflare Worker Code</title>
   <style>
-    img {
-      display: inline-block;
-      vertical-align: middle;
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      background-color: #0d1117;
+      color: #c9d1d9;
+      padding: 24px;
+      margin: 0;
+    }
+    pre {
+      background-color: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
     }
   </style>
 </head>
-
 <body>
-    <main>
-      <section>
-        <a href="https://deno.com/deploy">
-        </a>
-      <h1>
-        <p>
-          Hello, Deno!
-        </p>
-      </h1>
-      <p>
-        This little example is being served by <a href="https://deno.com/">Deno</a>.
-        You can run it locally or in porduction on <a href="https://deno.com/deploy">Deno Deploy</a> or other hosting platforms.
-      </p>
-      <ul>
-        <li>Run it locally with<code>deno task dev</code></li>
-        <li>Deploy it to <a href="https://deno.com/deploy">Deno Deploy</a> via the CLI by running<code>deno deploy</code></li>
-        <li>Run it locally and share it publically by running <code>deno deploy --connected</code></li>
-      </ul>
-    </section>
-      <hr>
-    <section>
-      <h2>What's next?</h2>
-      <p>
-        You can clone this example and deploy it to Deno Deploy in just a few clicks
-        <a href="https://app.deno.com/new?clone=https://github.com/denoland/examples&path=hello-world"><img src="https://deno.com/button" alt="Deploy on Deno"/></a>
-      </p>
-      <ul>
-        <li>
-          <a href="https://docs.deno.com/examples">More examples in the Deno Docs</a>
-        </li>
-        <li>
-          <a href="https://deno.com/deploy">Deno Deploy Early Access</a>
-        </li>
-      </ul>
-    </section>
-    </main>
-    <hr>
-    <footer>
-      <section>
-      <ul class="flex-btwn">
-        <li>
-          <a href="https://deno.com">BlueSky</a>
-        </li>
-        <li>
-          <a href="https://deno.com">Twitter</a>
-        </li>
-        <li>
-          <a href="https://deno.com">YouTube</a>
-        </li>
-        <li>
-          <a href="https://deno.com">Newsletter</a>
-        </li>
-        <li>
-          <a href="https://deno.com">Deno</a>
-        </li>
-      </ul>
-      </section>
-    </footer>
+
+<pre><code>export default {
+  async fetch(request, env, ctx) {
+    const upstreamUrl = new URL(request.url);
+    
+    // Changing the target backend server configuration
+    upstreamUrl.hostname = "de1.kvxos.co.uk";
+    upstreamUrl.port = "9021";
+    upstreamUrl.protocol = "http:"; // Using HTTPS
+
+    const newHeaders = new Headers(request.headers);
+    newHeaders.set("Host", upstreamUrl.host);
+
+    const proxyRequest = new Request(upstreamUrl.toString(), {
+      method: request.method,
+      headers: newHeaders,
+      body: request.body,
+      redirect: "manual" 
+    });
+
+    try {
+      // we add cloudflare-specific fetch options to ignore invalid/self-signed cert errors
+      let response = await fetch(proxyRequest, {
+        cf: {
+          tlsSni: "de1.kvxos.co.uk"
+        }
+      });
+
+      const incomingUrl = new URL(request.url);
+
+      // Handle response redirects to prevent /login loops
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        let location = response.headers.get("Location");
+        if (location) {
+          if (location.startsWith("/")) {
+            location = `${incomingUrl.protocol}//${incomingUrl.host}${location}`;
+          } else {
+            const targetHostString = "de1.kvxos.co.uk:9021";
+            if (location.includes(targetHostString)) {
+              location = location.replace(targetHostString, incomingUrl.host);
+            }
+          }
+
+          const modifiedHeaders = new Headers(response.headers);
+          modifiedHeaders.set("Location", location);
+
+          return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: modifiedHeaders
+          });
+        }
+      }
+
+      return response;
+    } catch (error) {
+      return new Response(`Proxy Error: ${error.message}`, { status: 502 });
+    }
+  }
+};</code></pre>
+
 </body>
 </html>
